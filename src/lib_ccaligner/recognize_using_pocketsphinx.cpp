@@ -410,6 +410,8 @@ bool PocketsphinxAligner::recognise() {
     INFO << "Recognising and aligning..";
 
     for (SubtitleItem *sub : _subtitles) {
+        /// For debug
+        DEBUG << sub->getText();
         if (sub->getDialogue().empty())
             continue;
 
@@ -455,8 +457,16 @@ bool PocketsphinxAligner::recognise() {
         _rvWord = ps_start_utt(_psWordDecoder);
         _rvWord = ps_process_raw(_psWordDecoder, sample + samplesAlreadyRead, samplesToBeRead, FALSE, FALSE);
         _rvWord = ps_end_utt(_psWordDecoder);
-
         _hypWord = ps_get_hyp(_psWordDecoder, &_scoreWord);
+
+        while (_hypWord == nullptr && samplesAlreadyRead > 16000) {
+            samplesAlreadyRead -= 16000;
+            
+            _rvWord = ps_start_utt(_psWordDecoder);
+            _rvWord = ps_process_raw(_psWordDecoder, sample + samplesAlreadyRead, samplesToBeRead, FALSE, FALSE);
+            _rvWord = ps_end_utt(_psWordDecoder);
+            _hypWord = ps_get_hyp(_psWordDecoder, &_scoreWord);
+        }
 
         if (_hypWord == nullptr) {
             _hypWord = "nullptr";
@@ -522,10 +532,13 @@ bool PocketsphinxAligner::align() {
         transcribe();
     }
     else {
-        if (_parameters->useFSG)
+        if (_parameters->useFSG) {
             alignWithFSG();
-        else
+            DEBUG << "Align with FSG!!!!";
+        } else {
             recognise();
+            DEBUG << "Align without FSG!!!!";
+        }
     }
 
     return true;
@@ -687,6 +700,7 @@ bool PocketsphinxAligner::alignWithFSG() {
         currSub.run();
 
         long int dialogueStartsAt = sub->getStartTime();
+
         std::string fsgname(_fsgPath + std::to_string(dialogueStartsAt));
         fsgname += ".fsg";
 
@@ -737,7 +751,6 @@ bool PocketsphinxAligner::alignWithFSG() {
         _rvWord = ps_start_utt(_psWordDecoder);
         _rvWord = ps_process_raw(_psWordDecoder, sample + samplesAlreadyRead, samplesToBeRead, FALSE, FALSE);
         _rvWord = ps_end_utt(_psWordDecoder);
-
         _hypWord = ps_get_hyp(_psWordDecoder, &_scoreWord);
 
         if (_hypWord == nullptr) {
@@ -749,7 +762,64 @@ bool PocketsphinxAligner::alignWithFSG() {
             }
 
             continue;
+        }
+        DEBUG << dialogueStartsAt;
+        while (_hypWord == nullptr && dialogueStartsAt > 1000) {
+            std::cout << "shift 1 second.\n";
+            DEBUG << "shift 1 second.\n";
+            dialogueStartsAt -= 1000;
 
+            std::string fsgname(_fsgPath + std::to_string(dialogueStartsAt));
+            fsgname += ".fsg";
+
+            cmd_ln_t *subConfig;
+            subConfig = cmd_ln_init(nullptr,
+                ps_args(), TRUE,
+                "-hmm", _modelPath.c_str(),
+                "-lm", _lmPath.c_str(),
+                "-dict", _dictPath.c_str(),
+                "-logfn", _logPath.c_str(),
+                "-fsg", fsgname.c_str(),
+                //                          "-lw", "1.0",
+                //                          "-beam", "1e-80",
+                //                          "-wbeam", "1e-60",
+                //                          "-pbeam", "1e-80",
+                nullptr);
+
+            if (subConfig == nullptr) {
+                fprintf(stderr, "Failed to create config object, see log for details\n");
+                return -1;
+            }
+
+            ps_reinit(_psWordDecoder, subConfig);
+
+            if (_psWordDecoder == nullptr) {
+                fprintf(stderr, "Failed to create recognizer, see log for details\n");
+                return -1;
+            }
+
+            long int dialogueLastsFor = (sub->getEndTime() - dialogueStartsAt);
+
+            long int samplesAlreadyRead = dialogueStartsAt * 16;
+            long int samplesToBeRead = dialogueLastsFor * 16;
+
+            if ((samplesAlreadyRead - recognitionWindow) >= 0)
+                samplesAlreadyRead -= recognitionWindow;
+            else
+                samplesAlreadyRead = 0;
+
+            if ((samplesToBeRead + (2 * recognitionWindow)) < _samples.size())
+                samplesToBeRead += (2 * recognitionWindow);
+
+            else
+                samplesToBeRead = _samples.size() - 1;
+
+            const int16_t *sample = _samples.data();
+
+            _rvWord = ps_start_utt(_psWordDecoder);
+            _rvWord = ps_process_raw(_psWordDecoder, sample + samplesAlreadyRead, samplesToBeRead, FALSE, FALSE);
+            _rvWord = ps_end_utt(_psWordDecoder);
+            _hypWord = ps_get_hyp(_psWordDecoder, &_scoreWord);
         }
 
         if (_parameters->displayRecognised) {
