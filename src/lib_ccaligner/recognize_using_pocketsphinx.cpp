@@ -459,6 +459,9 @@ bool PocketsphinxAligner::recognise() {
         _rvWord = ps_end_utt(_psWordDecoder);
         _hypWord = ps_get_hyp(_psWordDecoder, &_scoreWord);
 
+        // If the subtitles' start time is after the audio's finish time, we shifted 
+        // the subtitle's start time back by one second fragments until there was a match 
+        // between the approx and actual subtitles.
         while (_hypWord == nullptr && samplesAlreadyRead > 16000) {
             samplesAlreadyRead -= 16000;
             
@@ -763,6 +766,10 @@ bool PocketsphinxAligner::alignWithFSG() {
 
             continue;
         }
+
+        // If the subtitles' start time is after the audio's finish time,  we shifted 
+        // the subtitle's start time back by one second fragments until there was a match 
+        // between the approx and actual subtitles.
         DEBUG << dialogueStartsAt;
         while (_hypWord == nullptr && dialogueStartsAt > 1000) {
             std::cout << "shift 1 second.\n";
